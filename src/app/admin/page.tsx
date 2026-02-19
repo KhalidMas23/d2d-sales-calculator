@@ -1,5 +1,12 @@
+//src/app/admin/page.tsx
 "use client";
 
+
+// In admin dashboard header:
+import LogoutButton from "@/components/LogoutButton";
+import ProtectedRoute from "@/components/ProtectedRoute";
+
+import Link from "next/link";
 import { useState, useEffect } from "react";
 import { getQuotes, getAllPartners, deleteQuote, type Quote, type Partner } from "@/lib/supabase";
 
@@ -48,11 +55,23 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <ProtectedRoute requireSuperAdmin={true}>
+      <div className="min-h-screen bg-gray-100">
       <div className="max-w-7xl mx-auto py-8 px-4">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Super Admin Dashboard</h1>
-          <p className="text-gray-600 mt-2">View and manage all quotes across all partners</p>
+        <div className="mb-8 flex justify-between items-start">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Super Admin Dashboard</h1>
+            <p className="text-gray-600 mt-2">View and manage all quotes across all partners</p>
+          </div>
+          <div className="flex gap-4 items-start">
+            <Link
+              href="/admin/partners"
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md transition-colors font-medium"
+            >
+              🏢 Manage Partners
+            </Link>
+            <LogoutButton />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -180,6 +199,7 @@ export default function AdminDashboard() {
         />
       )}
     </div>
+    </ProtectedRoute>
   );
 }
 
@@ -540,4 +560,6 @@ function QuoteDetailModal({ quote, onClose }: QuoteDetailModalProps) {
       </div>
     </div>
   );
+
+  
 }

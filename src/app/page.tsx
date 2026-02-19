@@ -583,6 +583,7 @@ const saveCurrentQuote = async () => {
       service_city: customer.serviceCity,
       service_state: customer.serviceState,
       service_zip: customer.serviceZip,
+      po_number: customer.poNumber || null,
       partner_id: currentPartner?.partner_code || 'AQUARIA_HQ',
       partner_name: currentPartner?.company_name || 'Aquaria Technologies',
       partner_logo_url: currentPartner?.logo_url || null,
@@ -681,7 +682,9 @@ const loadQuote = (quote: Quote) => {
 
 
 
-// Download PDF using jsPDF
+// DYNAMIC SCALING PDF GENERATION
+// Replace the downloadPDF function in src/app/page.tsx (around line 745)
+
 const downloadPDF = async () => {
   if (quoteTotal === null || quoteIsStale) {
     alert("Please click 'Calculate Total' to generate an updated quote before downloading.");
@@ -702,386 +705,434 @@ const downloadPDF = async () => {
   }
 
   const doc = new jsPDF("p", "mm", "a4");
-  const date = new Date().toLocaleDateString("en-US");
+  const date = new Date().toLocaleDateString("en-US", { year: 'numeric', month: 'long', day: 'numeric' });
   const baseTotal = originalTotal ?? total;
-  const isDiscountActive =
-    DISCOUNT_FEATURE_ENABLED &&
-    discountActive &&
-    originalTotal !== null &&
-    discountedTotal !== null &&
-    discountedTotal !== originalTotal;
+  const isDiscountActive = DISCOUNT_FEATURE_ENABLED && discountActive && originalTotal !== null && 
+                          discountedTotal !== null && discountedTotal !== originalTotal;
 
-  const baseTotalStr = baseTotal.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  const baseTotalStr = baseTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const discountAmountStr = isDiscountActive ? (discountAmount || baseTotal - (discountedTotal as number)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00";
+  const discountedTotalStr = (isDiscountActive ? discountedTotal : baseTotal)!.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const discountAmountStr = isDiscountActive
-    ? (discountAmount || baseTotal - (discountedTotal as number)).toLocaleString(
-        undefined,
-        {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        }
-      )
-    : "0.00";
-
-  const discountedTotalStr = (isDiscountActive
-    ? discountedTotal
-    : baseTotal
-  )!.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  // --- helpers ---
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  let y = 40;
-  const leftX = 20;
+  const leftMargin = 20;
 
-  function ensureSpace(needs: number) {
-    if (y + needs > pageHeight - 20) {
+  // === COUNT ITEMS FOR DYNAMIC SCALING ===
+  let itemCount = 0;
+  
+  // System items
+  if (model) itemCount += 2 + (mobility ? 1 : 0); // system + shipping + mobility
+  
+  // Tank items
+  if (tank) {
+    itemCount += 1; // tank
+    if (city) itemCount += 1; // delivery
+    if (tankPad) itemCount += 1; // pad
+  }
+  
+  // Installation items
+  if (unitPad) itemCount += 1;
+  itemCount += trenchingSections.filter(t => t.type && t.distance > 0).length;
+  itemCount += ab_trenchingSections.filter(t => t.type && t.distance > 0).length;
+  if (panelUpgrade) itemCount += 1;
+  if (pump && pumpPrices[pump]) itemCount += 2; // pump + installation
+  if (demolition?.enabled && demolition?.distance > 0) itemCount += 1;
+  if (unitPad || trenchingSections.some(t => t.type) || ab_trenchingSections.some(t => t.type) || 
+      panelUpgrade || pump || demolition?.enabled) {
+    itemCount += 1; // Professional Installation & Commissioning
+  }
+  
+  // Additional items
+  if (sensor) itemCount += 1;
+  if (filter && filterQty > 0) itemCount += 1;
+  if (connection) itemCount += 1;
+  
+  // Warranty
+  if (warranty && warranty !== "standard") itemCount += 1;
+  
+  // Custom adjustments
+  const enabledCustoms = customAdjs.filter(c => c.enabled && c.label.trim() !== "" && Number(c.amount) !== 0);
+  itemCount += enabledCustoms.length;
+
+  // === DETERMINE SCALE FACTOR ===
+  // Small quotes (1-15 items): 100% scale (10pt font, 7mm spacing)
+  // Medium quotes (16-25 items): 85% scale (8.5pt font, 6mm spacing)
+  // Large quotes (26-35 items): 75% scale (7.5pt font, 5mm spacing)
+  // XL quotes (36+ items): 65% scale (6.5pt font, 4.5mm spacing) - may go to 2 pages
+  
+  let scaleFactor = 1.0;
+  if (itemCount <= 15) {
+    scaleFactor = 1.0; // Full size
+  } else if (itemCount <= 25) {
+    scaleFactor = 0.85; // Compact
+  } else if (itemCount <= 35) {
+    scaleFactor = 0.75; // More compact
+  } else {
+    scaleFactor = 0.65; // Very compact (may still need 2 pages)
+  }
+
+  // Apply scaling to fonts and spacing
+  const baseFontSize = 10 * scaleFactor;
+  const headerFontSize = 11 * scaleFactor;
+  const totalFontSize = 13 * scaleFactor;
+  const itemSpacing = 7 * scaleFactor;
+  const sectionSpacing = 8 * scaleFactor;
+
+  let y = 30; // Start after header
+
+  // Helper: Check if we need a new page
+  function ensureSpace(needed: number) {
+    if (y + needed > pageHeight - 20) {
       doc.addPage();
       y = 20;
     }
   }
 
+  // Helper: Add section header
   const addSectionHeader = (title: string) => {
-    ensureSpace(20);
+    ensureSpace(15 * scaleFactor);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
+    doc.setFontSize(headerFontSize);
     doc.setTextColor(43, 103, 119);
-    doc.text(title, leftX, y);
-    y += 3;
-    doc.setDrawColor(200);
-    doc.line(leftX, y, pageWidth - leftX, y);
-    y += 8;
+    doc.text(title, leftMargin, y);
+    y += 3 * scaleFactor;
+    doc.setDrawColor(209, 213, 219);
+    doc.line(leftMargin, y, pageWidth - leftMargin, y);
+    y += sectionSpacing;
     doc.setTextColor(0, 0, 0);
   };
 
-  const addLine = (label: string, value: string) => {
-    ensureSpace(10);
+  // Helper: Add item line
+  const addItem = (text: string) => {
+    ensureSpace(8 * scaleFactor);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-    doc.text(`${label}:`, leftX + 5, y);
-    doc.text(value, 95, y, { maxWidth: pageWidth - 110 });
-    y += 7;
+    doc.setFontSize(baseFontSize);
+    doc.text(`• ${text}`, leftMargin + 5, y);
+    y += itemSpacing;
   };
 
-  const addService = (component: string, qty: string, description: string) => {
-    ensureSpace(10);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-    doc.text(component, leftX + 5, y, { maxWidth: 65 });
-    doc.text(qty, 95, y);
-    doc.text(description, 120, y, { maxWidth: pageWidth - 140 });
-    y += 7;
-  };
-
-  const safeGetText = (sel: string) => {
-    const el = document.querySelector(sel) as HTMLOptionElement | null;
-    return (el?.textContent || "None").trim();
-  };
-
- // --- Load and compress logo ---
-let logoData: { dataUrl: string; width: number; height: number } | null = null;
-
-try {
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    const timeoutId = setTimeout(() => reject(new Error('Timeout')), 5000);
-    
-    image.onload = () => {
-      clearTimeout(timeoutId);
-      resolve(image);
-    };
-    image.onerror = () => {
-      clearTimeout(timeoutId);
-      reject(new Error('Failed to load'));
-    };
-    
-    image.src = "/AQ_TRANSPARENT_LOGO.png";
-  });
-
-  // Compress PNG while maintaining transparency
-  const canvas = document.createElement('canvas');
-  const maxWidth = 150; // Smaller = smaller file size
-  const scale = maxWidth / img.width;
-  canvas.width = maxWidth;
-  canvas.height = img.height * scale;
-  
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    logoData = {
-      dataUrl: canvas.toDataURL('image/png'),
-      width: canvas.width,
-      height: canvas.height
-    };
-  }
-} catch (err) {
-  console.warn('Logo failed to load:', err);
-}
-
-// --- Header Bar & Logo ---
-doc.setFillColor(243, 244, 246);
-doc.rect(0, 0, pageWidth, 25, "F");
-
-if (logoData) {
+  // Load and compress logo
+  let logoData: { dataUrl: string; width: number; height: number } | null = null;
   try {
-    const logoWidth = 35;
-    const aspectRatio = logoData.width / logoData.height;
-    const logoHeight = logoWidth / aspectRatio;
-    
-    doc.addImage(logoData.dataUrl, "PNG", 15, 5, logoWidth, logoHeight);
-  } catch (err) {
-    console.warn('Failed to add logo to PDF:', err);
-  }
-} else {
-  // Fallback: Company name as text
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(43, 103, 119);
-  doc.text("Aquaria Technologies", 15, 12);
-}
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      const timeoutId = setTimeout(() => reject(new Error('Timeout')), 5000);
+      
+      image.onload = () => {
+        clearTimeout(timeoutId);
+        resolve(image);
+      };
+      image.onerror = () => {
+        clearTimeout(timeoutId);
+        reject(new Error('Failed to load'));
+      };
+      
+      image.src = "/AQ_TRANSPARENT_LOGO.png";
+    });
 
-  // Company Info Right
+    const canvas = document.createElement('canvas');
+    const maxWidth = 150;
+    const scale = maxWidth / img.width;
+    canvas.width = maxWidth;
+    canvas.height = img.height * scale;
+    
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      logoData = {
+        dataUrl: canvas.toDataURL('image/png'),
+        width: canvas.width,
+        height: canvas.height
+      };
+    }
+  } catch (err) {
+    console.warn('Logo failed to load:', err);
+  }
+
+  // === HEADER (Gray Background) ===
+  doc.setFillColor(243, 244, 246);
+  doc.rect(0, 0, pageWidth, 25, "F");
+
+  if (logoData) {
+    try {
+      const logoWidth = 30;
+      const aspectRatio = logoData.width / logoData.height;
+      const logoHeight = logoWidth / aspectRatio;
+      doc.addImage(logoData.dataUrl, "PNG", 15, 7, logoWidth, logoHeight);
+    } catch (err) {
+      console.warn('Failed to add logo:', err);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(43, 103, 119);
+      doc.text("AQUARIA", 15, 14);
+      doc.text("TECHNOLOGIES", 15, 19);
+    }
+  } else {
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(43, 103, 119);
+    doc.text("AQUARIA", 15, 14);
+    doc.text("TECHNOLOGIES", 15, 19);
+  }
+
+  // Header info (right side)
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(55, 65, 81);
-  const infoX = pageWidth - 80;
+  const infoX = pageWidth - 20;
   let infoY = 12;
-  doc.text("600 Congress Ave, Austin, TX 78701", infoX, infoY);
-  infoY += 6;
-  doc.text(`Quote Generated: ${date}`, infoX, infoY);
-
-  // Customer Info Block (left side)
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.setTextColor(43, 103, 119);
-  doc.text("Customer", leftX, 30);
-  doc.setTextColor(0, 0, 0);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-
-  let custY = 36;
-  const addr = `${customer.serviceStreet}, ${customer.serviceCity}, ${customer.serviceState} ${customer.serviceZip}`;
   
-  doc.text(customer.company ? `${customer.company}` : `${customer.contactName}`, leftX, custY); custY += 5;
-  if (customer.company) { doc.text(`Attn: ${customer.contactName}`, leftX, custY); custY += 5; }
-  if (customer.phone) { doc.text(`Phone: ${customer.phone}`, leftX, custY); custY += 5; }
-  if (customer.email) { doc.text(`Email: ${customer.email}`, leftX, custY); custY += 5; }
-  doc.text(`Service: ${addr}`, leftX, custY); custY += 5;
+  if (quoteNumber) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(43, 103, 119);
+    doc.text(`QUOTE #${quoteNumber}`, infoX, infoY, { align: "right" });
+    infoY += 6;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(55, 65, 81);
+  }
+  doc.text(date, infoX, infoY, { align: "right" });
+  infoY += 5;
+  doc.text("600 Congress Ave, Austin, TX", infoX, infoY, { align: "right" });
 
-  // bump main content start if needed so it doesn't collide
-  y = Math.max(y, custY + 6);
-
-  // --- Main Product ---
-  addSectionHeader("Main Product");
-  const modelText = model ? safeGetText(`#model option[value='${model}']`) : "None";
-  addLine("Hydropack Model", modelText);
-
-  // --- Tank Selection ---
-  addSectionHeader("Tank Selection");
-  const tankText = tank ? safeGetText(`#tank option[value='${tank}']`) : "None";
-  addLine("Selected Tank", tankText);
-
-  // --- Additional Filters ---
-  addSectionHeader("Additional Filters");
-  const filterText = filter ? safeGetText(`#filter option[value='${filter}']`) : "None";
-  addLine("Extra Filter(s)", `${filterText} x${filterQty}`);
-
-  // --- Shipping/Handling ---
-  addSectionHeader("Shipping/Handling");
-  addLine("Nearest City", city || "None");
-
-  // --- Additional Services ---
-  addSectionHeader("Additional Services");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("Component", leftX + 5, y);
-  doc.text("Qty", 95, y);
-  doc.text("Description", 120, y);
-  y += 7;
-  doc.setFont("helvetica", "normal");
-
-  if (unitPad) addService("Unit Concrete Pad", "1", "Concrete base for main system");
-  if (tankPad) addService("Tank Concrete Pad", "1", "Concrete base for tank support");
-
-  // Trenching
-  const trenchLabels: Record<string, string> = {
-    trench_elec: "Trenching - Electrical",
-    trench_plumb: "Trenching - Plumbing",
-    trench_comb: "Trenching - Combined",
-  };
-  const ab_trenchLabels: Record<string, string> = {
-    ab_elec: "Above Ground - Electrical",
-    ab_plumb: "Above Ground - Plumbing",
-    ab_comb: "Above Ground - Combined",
-  };
-
-  const trenchingLines = trenchingSections.filter((s) => s.type && s.distance > 0);
-  trenchingLines.forEach(({ type, distance }) => {
-    const label = trenchLabels[type] || type;
-    addService(label, `${distance} ft`, "Trenching Services");
-  });
-
-  const ab_trenchingLines = ab_trenchingSections.filter((s) => s.type && s.distance > 0);
-  ab_trenchingLines.forEach(({ type, distance }) => {
-    const label = ab_trenchLabels[type] || type;
-    addService(label, `${distance} ft`, "Trenching Services");
-  });
-
-  // Connection Type (kept under Additional Services)
-  if (connection === "2way-t-valve") addService("Connection Type", "", "Manual 2-way T-valve install");
-  if (connection === "3way-t-valve") addService("Connection Type", "", "Automatic 3-way T-valve install");
-
-  // Panel/Subpanel
-  if (panelUpgrade === "panel") addService("Panel Upgrade", "", "Electrical panel enhancement");
-  else if (panelUpgrade === "subpanel") addService("Subpanel Upgrade", "", "Electrical subpanel support");
-
-// --- Custom Adjustments (PDF) ---
-const enabledCustoms = customAdjs.filter(
-  (c) => c.enabled && c.label.trim() !== "" && Number(c.amount) !== 0
-);
-
-if (enabledCustoms.length > 0) {
-  addSectionHeader("Custom Adjustments");
-
-  // Header row
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
   doc.setTextColor(0, 0, 0);
-  doc.text("Component", leftX + 5, y);
-  doc.text("Amount", 95, y);
-  doc.text("Notes", 120, y);
-  y += 7;
 
-  // Rows
+  // === CUSTOMER INFO ===
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(headerFontSize);
+  doc.text(`Customer: ${customer.company || customer.contactName}`, leftMargin, y);
+  
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
-  const lineHeight = 6;
+  doc.setFontSize(baseFontSize);
+  
+  y += 5 * scaleFactor;
+  
+  if (customer.company && customer.contactName) {
+    doc.text(`Contact: ${customer.contactName}`, leftMargin, y);
+    y += 5 * scaleFactor;
+  }
+  
+  const contactLine = [];
+  if (customer.email) contactLine.push(`Email: ${customer.email}`);
+  if (customer.phone) contactLine.push(`Phone: ${customer.phone}`);
+  if (contactLine.length > 0) {
+    doc.text(contactLine.join(" | "), leftMargin, y);
+    y += 5 * scaleFactor;
+  }
+  
+  doc.text(`Service Address: ${customer.serviceStreet}, ${customer.serviceCity}, ${customer.serviceState} ${customer.serviceZip}`, leftMargin, y);
+  y += 5 * scaleFactor;
+  
+  if (customer.poNumber) {
+    doc.text(`PO Number: ${customer.poNumber}`, leftMargin, y);
+    y += 5 * scaleFactor;
+  }
 
-  enabledCustoms.forEach((c) => {
-    ensureSpace(lineHeight + 6);
+  y += 3 * scaleFactor;
 
-    const labelText = (c.label || "").trim();
-    const amtStr =
-      (c.amount >= 0 ? "+$" : "-$") +
-      Math.abs(c.amount).toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
+  // === SYSTEM & EQUIPMENT ===
+  const hasSystemItems = model;
+  if (hasSystemItems) {
+    addSectionHeader("SYSTEM & EQUIPMENT");
+    
+    if (model) {
+      const modelNames: Record<string, string> = {
+        s: 'Hydropack S',
+        standard: 'Hydropack',
+        x: 'Hydropack X'
+      };
+      addItem(`${modelNames[model]} (1)`);
+      addItem('Shipping & Handling');
+      if (mobility) addItem('Mobility Assistance');
+    }
+  }
 
-    const notes = (c.notes || "").trim();
-    const wrappedNotes = notes
-      ? doc.splitTextToSize(notes, pageWidth - 20 - 120) // wrap within Notes column
-      : [""];
+  // === TANK & STORAGE ===
+  const hasTankItems = tank;
+  if (hasTankItems) {
+    addSectionHeader("TANK & STORAGE");
+    
+    if (tank) {
+      addItem(`${tank} Gallon Storage Tank (1)`);
+      if (city) addItem(`Delivery to ${city}`);
+      if (tankPad) addItem('Tank Concrete Pad');
+    }
+  }
 
-    doc.text(labelText || "—", leftX + 5, y, { maxWidth: 65 });
-    doc.text(amtStr, 95, y);
-    doc.text(wrappedNotes, 120, y);
+  // === INSTALLATION SERVICES ===
+  const hasInstallation = unitPad || trenchingSections.some(t => t.type && t.distance > 0) || 
+                          ab_trenchingSections.some(t => t.type && t.distance > 0) || 
+                          panelUpgrade || (pump && pumpPrices[pump]) || (demolition?.enabled && demolition?.distance > 0);
+  
+  if (hasInstallation) {
+    addSectionHeader("INSTALLATION SERVICES");
+    
+    if (unitPad) addItem('Unit Concrete Pad');
+    
+    // Trenching
+    const trenchLabels: Record<string, string> = {
+      trench_elec: 'Electrical',
+      trench_plumb: 'Plumbing',
+      trench_comb: 'Combined Electrical + Plumbing'
+    };
+    
+    trenchingSections.forEach(({ type, distance }) => {
+      if (type && distance > 0) {
+        addItem(`Trenching - ${trenchLabels[type]} (${distance} ft)`);
+      }
+    });
+    
+    // Above ground
+    const abLabels: Record<string, string> = {
+      ab_elec: 'Electrical',
+      ab_plumb: 'Plumbing',
+      ab_comb: 'Combined Electrical + Plumbing'
+    };
+    
+    ab_trenchingSections.forEach(({ type, distance }) => {
+      if (type && distance > 0) {
+        addItem(`Above Ground Run - ${abLabels[type]} (${distance} ft)`);
+      }
+    });
+    
+    if (panelUpgrade === "panel") addItem('Electrical Panel Upgrade');
+    if (panelUpgrade === "subpanel") addItem('Electrical Subpanel Upgrade');
+    
+    if (pump && pumpPrices[pump]) {
+      const pumpNames: Record<string, string> = {
+        dab: 'External Water Pump - DAB',
+        mini: 'External Water Pump - DAB Mini'
+      };
+      addItem(`${pumpNames[pump] || 'External Water Pump'} (1)`);
+      addItem('Pump Installation');
+    }
+    
+    if (demolition?.enabled && demolition?.distance > 0) {
+      addItem(`Demolition Services (${demolition.distance} ft)`);
+    }
+    
+    // Bundle all hidden fees
+    addItem('Professional Installation & Commissioning');
+  }
 
-    const rowHeight = wrappedNotes.length * lineHeight;
-    y += rowHeight + 2;
-  });
-}
+  // === ADDITIONAL ITEMS ===
+  const hasAdditionalItems = sensor || (filter && filterQty > 0) || connection;
+  
+  if (hasAdditionalItems) {
+    addSectionHeader("ADDITIONAL ITEMS");
+    
+    if (sensor && sensorPrices[sensor]) {
+      addItem('Tank Sensor (1)');
+    }
+    
+    if (filter && filterQty > 0) {
+      const filterNames: Record<string, string> = {
+        s: 'Hydropack S',
+        standard: 'Hydropack',
+        x: 'Hydropack X'
+      };
+      addItem(`Extra ${filterNames[filter]} Filters (${filterQty})`);
+    }
+    
+    if (connection === "2way-t-valve") addItem('Manual 2-way T-valve');
+    if (connection === "3way-t-valve") addItem('Automatic 3-way T-valve');
+  }
 
+  // === WARRANTY ===
+  if (warranty && warranty !== "standard") {
+    addSectionHeader("WARRANTY");
+    
+    if (warranty === "warranty5") addItem('5-Year Extended Warranty');
+    if (warranty === "warranty8") addItem('8-Year Extended Warranty');
+  }
 
+  // === CUSTOM ADJUSTMENTS ===
+  if (enabledCustoms.length > 0) {
+    addSectionHeader("ADDITIONAL ADJUSTMENTS");
+    
+    enabledCustoms.forEach(adj => {
+      const label = adj.label || 'Adjustment';
+      const noteText = adj.notes ? ` - ${adj.notes}` : '';
+      addItem(`${label}${noteText}`);
+    });
+  }
 
-  // --- Warranty ---
-  addSectionHeader("Warranty");
-  if (warranty === "warranty5") addService("5-Year Extended Warranty", "", "Extended protection for system");
-  else if (warranty === "warranty8") addService("8-Year Extended Warranty", "", "Extended protection for system");
-  else addService("Standard Warranty", "", "Basic coverage included at no cost");
+  // === TOTALS ===
+  y += 5 * scaleFactor;
+  ensureSpace(40 * scaleFactor);
+  
+  doc.setDrawColor(209, 213, 219);
+  doc.setLineWidth(0.5);
+  doc.line(leftMargin, y, pageWidth - leftMargin, y);
+  y += 10 * scaleFactor;
 
-  // --- Sales Tax ---
-  addSectionHeader("8.25% Sales Tax");
+  const taxRate = 0.0825;
+  const tax = baseTotal * taxRate;
 
-  // --- Discount Line Item + Totals ---
-ensureSpace(25);
-doc.setFont("helvetica", "bold");
-doc.setTextColor(0, 0, 0);
-
-// If the discount is active, show original, discount, and discounted total
-if (isDiscountActive) {
-  // Original total (smaller font)
-  doc.setFontSize(10);
-  doc.text(
-    `Original Total: $${baseTotalStr}`,
-    pageWidth - 20,
-    y,
-    { align: "right" }
-  );
-  y += 6;
-
-  // Discount line (friendly orange)
-  doc.setFontSize(10);
-  doc.setTextColor(0, 0, 0); // approx Tailwind amber-600
-  doc.text(
-    `${DISCOUNT_CAMPAIGN.label}: -$${discountAmountStr}`,
-    pageWidth - 20,
-    y,
-    { align: "right" }
-  );
-  y += 6;
-
-  // Final discounted total (larger font, black)
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(13);
-  doc.text(
-    `Total after Discount: $${discountedTotalStr}`,
-    pageWidth - 20,
-    y,
-    { align: "right" }
-  );
-  y += 2;
-} else {
-  // No discount → single total line only
-  doc.setFontSize(13);
-  doc.text(
-    `Total: $${baseTotalStr}`,
-    pageWidth - 20,
-    y,
-    { align: "right" }
-  );
-  y += 2;
-}
-
-
-  // --- Footer ---
-  doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(100);
+  doc.setFontSize(headerFontSize);
+  
+  // Subtotal
+  doc.text("Subtotal:", pageWidth - 80, y);
+  doc.text(`$${baseTotalStr}`, pageWidth - 20, y, { align: "right" });
+  y += 7 * scaleFactor;
+
+  // Tax
+  doc.text("Tax (8.25%):", pageWidth - 80, y);
+  doc.text(`$${tax.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, pageWidth - 20, y, { align: "right" });
+  y += 7 * scaleFactor;
+
+  // Discount (if active)
+  if (isDiscountActive) {
+    doc.setTextColor(194, 65, 12);
+    doc.text(`${DISCOUNT_CAMPAIGN.label}:`, pageWidth - 80, y);
+    doc.text(`-$${discountAmountStr}`, pageWidth - 20, y, { align: "right" });
+    y += 10 * scaleFactor;
+    doc.setTextColor(0, 0, 0);
+  } else {
+    y += 3 * scaleFactor;
+  }
+
+  // Total line
+  doc.setDrawColor(55, 65, 81);
+  doc.setLineWidth(0.5);
+  doc.line(pageWidth - 85, y, pageWidth - 20, y);
+  y += 8 * scaleFactor;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(totalFontSize);
+  doc.text("TOTAL:", pageWidth - 80, y);
+  doc.text(`$${discountedTotalStr}`, pageWidth - 20, y, { align: "right" });
+
+  // === FOOTER ===
+  doc.setFontSize(9 * scaleFactor);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(107, 114, 128);
   doc.text(
-    "Thank you for your interest in Aquaria. This quote is valid for 30 days. Aquaria Atmospheric Water Generator units are exempt from sales tax.",
+    "Thank you for your interest in Aquaria. This quote is valid for 30 days.",
     pageWidth / 2,
-    pageHeight - 12,
-    { align: "center", maxWidth: pageWidth - 40 }
+    pageHeight - 15,
+    { align: "center" }
   );
 
+  // === SAVE PDF ===
   function sanitizeFilename(name: string) {
-  return name
-    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "") // strip accents
-    .replace(/[\\/:"*?<>|]+/g, "")                    // illegal on Win/Mac
-    .replace(/\s+/g, " ")                              // collapse whitespace
-    .trim()
-    .replace(/ /g, "_")                                // spaces -> underscores
-    .slice(0, 180);                                    // keep it reasonable
-}
+    return name
+      .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\\/:"*?<>|]+/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/ /g, "_")
+      .slice(0, 180);
+  }
 
-const dateISO = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-const serviceAddr =
-  `${customer.serviceStreet} ${customer.serviceCity} ${customer.serviceState} ${customer.serviceZip}`.trim();
-const who = customer.company || customer.contactName || "Customer";
+  const dateISO = new Date().toISOString().slice(0, 10);
+  const who = customer.company || customer.contactName || "Customer";
+  const filename = sanitizeFilename(`Hydropack_Quote_${quoteNumber || dateISO}_${who}.pdf`);
 
-const filename = sanitizeFilename(
-  `Hydropack_Quote_${who}_${serviceAddr}_${dateISO}.pdf`
-);
-
-// finally:
-doc.save(filename);
+  doc.save(filename);
 };
 
 
@@ -1421,8 +1472,8 @@ doc.save(filename);
 
         >
           <option value="">Select</option>
-          <option value="ab_elec">Electrical (above ground)</option>
-          <option value="ab_plumb">Plumbing (above ground)</option>
+          <option value="ab_elec">Electrical</option>
+          <option value="ab_plumb">Plumbing</option>
           <option value="ab_comb">Combined Electrical + Plumbing</option>
         </select>
       </div>

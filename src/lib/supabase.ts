@@ -5,6 +5,51 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Feature configuration for partners
+export interface PartnerFeatureConfig {
+  // Product availability
+  enabledModels: string[];        // ['s', 'standard', 'x']
+  enabledTanks: string[];         // ['500', '1550', '3000', '5000']
+  enabledCities: string[];        // ['Austin', 'Houston', 'Dallas', etc.]
+  
+  // Feature toggles
+  enableWarrantyUpgrades: boolean;
+  enableDemolition: boolean;
+  enableTrenching: boolean;
+  enableAbovegroundTrenching: boolean;
+  enablePanelUpgrade: boolean;
+  enableCustomAdjustments: boolean;
+  enablePumps: boolean;
+  enableSensors: boolean;
+  enableFilters: boolean;
+  
+  // Custom text
+  customDisclaimers?: string;
+  customNotes?: string;
+  
+  // Display options
+  showPricing: boolean;           // Show prices in calculator
+  requireApproval: boolean;       // Quotes need Aquaria approval
+}
+
+// Default feature config - everything enabled
+export const DEFAULT_FEATURE_CONFIG: PartnerFeatureConfig = {
+  enabledModels: ['s', 'standard', 'x'],
+  enabledTanks: ['500', '1550', '3000', '5000'],
+  enabledCities: ['Austin', 'Corpus Christi', 'Dallas', 'Houston', 'San Antonio'],
+  enableWarrantyUpgrades: true,
+  enableDemolition: true,
+  enableTrenching: true,
+  enableAbovegroundTrenching: true,
+  enablePanelUpgrade: true,
+  enableCustomAdjustments: true,
+  enablePumps: true,
+  enableSensors: true,
+  enableFilters: true,
+  showPricing: true,
+  requireApproval: false,
+};
+
 export interface Partner {
   id: string;
   partner_code: string;
@@ -20,17 +65,19 @@ export interface Partner {
   display_email: string | null;
   display_website: string | null;
   pricing_overrides: Record<string, unknown> | null;
+  feature_config: PartnerFeatureConfig | null;  // NEW FIELD
   is_active: boolean;
   can_create_quotes: boolean;
   can_edit_pricing: boolean;
   notes: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export async function getAllPartners(): Promise<Partner[]> {
   const { data, error } = await supabase
     .from('partners')
     .select('*')
-    .eq('is_active', true)
     .order('company_name');
   
   if (error) {
@@ -38,6 +85,64 @@ export async function getAllPartners(): Promise<Partner[]> {
     return [];
   }
   return data || [];
+}
+
+// Get single partner by code
+export async function getPartnerByCode(partnerCode: string): Promise<Partner | null> {
+  const { data, error } = await supabase
+    .from('partners')
+    .select('*')
+    .eq('partner_code', partnerCode)
+    .single();
+  
+  if (error) {
+    console.error('Error loading partner:', error);
+    return null;
+  }
+  
+  return data;
+}
+
+// Update partner
+export async function updatePartner(id: string, updates: Partial<Partner>): Promise<Partner | null> {
+  const { data, error } = await supabase
+    .from('partners')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error updating partner:', error);
+    return null;
+  }
+  
+  return data;
+}
+
+// Create new partner
+export async function createPartner(partner: Omit<Partner, 'id' | 'created_at' | 'updated_at'>): Promise<Partner | null> {
+  const { data, error } = await supabase
+    .from('partners')
+    .insert(partner)
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error creating partner:', error);
+    return null;
+  }
+  
+  return data;
+}
+
+// Helper to get feature config with defaults
+export function getFeatureConfig(partner: Partner): PartnerFeatureConfig {
+  if (partner.feature_config) {
+    // Merge with defaults to ensure all fields exist
+    return { ...DEFAULT_FEATURE_CONFIG, ...partner.feature_config };
+  }
+  return DEFAULT_FEATURE_CONFIG;
 }
 
 // Generate unique quote number with partner prefix
@@ -98,6 +203,7 @@ export interface Quote {
   service_city: string;
   service_state: string;
   service_zip: string;
+  po_number: string | null;
   
   // Partner info
   partner_id: string | null;
@@ -112,7 +218,6 @@ export interface Quote {
   discount_amount: number;
   final_total: number;
   partner_pricing: Record<string, unknown> | null;
-
   
   // Status
   status: 'draft' | 'sent' | 'accepted' | 'ordered';

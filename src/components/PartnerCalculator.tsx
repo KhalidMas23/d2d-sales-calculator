@@ -8,6 +8,7 @@ import {
   saveQuote,
   updateQuote,
   generateQuoteNumber,
+  getFeatureConfig,  // ADDED THIS LINE
   type Partner,
   type Quote,
   type QuoteConfig
@@ -46,6 +47,9 @@ const DISCOUNT_CAMPAIGN = {
 export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
   // Get partner pricing or use defaults
   const partnerPricing = partner.pricing_overrides || {};
+  
+  // GET FEATURE CONFIG - ADDED THIS LINE
+  const featureConfig = getFeatureConfig(partner);
   
   // Apply partner pricing overrides (or use Aquaria defaults)
   const modelPrices: Record<string, ModelPriceStructure> = (partnerPricing.modelPrices as Record<string, ModelPriceStructure>) || {
@@ -852,9 +856,9 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             onChange={(e) => { setModel(e.target.value); markDirty(); }}
           >
             <option value="">Select Model</option>
-            <option value="s">Hydropack S</option>
-            <option value="standard">Hydropack</option>
-            <option value="x">Hydropack X</option>
+            {featureConfig.enabledModels.includes('s') && <option value="s">Hydropack S</option>}
+            {featureConfig.enabledModels.includes('standard') && <option value="standard">Hydropack</option>}
+            {featureConfig.enabledModels.includes('x') && <option value="x">Hydropack X</option>}
           </select>
 
           <label className="flex items-center mt-2">
@@ -894,10 +898,10 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             onChange={(e) => { setTank(e.target.value); markDirty(); }}
           >
             <option value="">None</option>
-            <option value="500">500 gallon</option>
-            <option value="1550">1550 gallon</option>
-            <option value="3000">3000 gallon</option>
-            <option value="5000">5000 gallon</option>
+            {featureConfig.enabledTanks.includes('500') && <option value="500">500 gallon</option>}
+            {featureConfig.enabledTanks.includes('1550') && <option value="1550">1550 gallon</option>}
+            {featureConfig.enabledTanks.includes('3000') && <option value="3000">3000 gallon</option>}
+            {featureConfig.enabledTanks.includes('5000') && <option value="5000">5000 gallon</option>}
           </select>
           <label className="flex items-center mt-2">
             <input
@@ -920,14 +924,15 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             onChange={(e) => { setCity(e.target.value); markDirty(); }}
           >
             <option value="">Select City</option>
-            <option value="Austin">Austin</option>
-            <option value="Corpus Christi">Corpus Christi</option>
-            <option value="Dallas">Dallas</option>
-            <option value="Houston">Houston</option>
-            <option value="San Antonio">San Antonio</option>
+            {featureConfig.enabledCities.includes('Austin') && <option value="Austin">Austin</option>}
+            {featureConfig.enabledCities.includes('Corpus Christi') && <option value="Corpus Christi">Corpus Christi</option>}
+            {featureConfig.enabledCities.includes('Dallas') && <option value="Dallas">Dallas</option>}
+            {featureConfig.enabledCities.includes('Houston') && <option value="Houston">Houston</option>}
+            {featureConfig.enabledCities.includes('San Antonio') && <option value="San Antonio">San Antonio</option>}
           </select>
         </fieldset>
 
+        {featureConfig.enableSensors && (
         <fieldset className="border border-gray-300 rounded bg-gray-50 mb-6 p-4">
           <legend className="font-semibold px-2">Tank Sensor</legend>
           <select
@@ -940,7 +945,9 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             <option value="normal">Normal</option>
           </select>
         </fieldset>
+        )}
 
+        {featureConfig.enableFilters && (
         <fieldset className="border border-gray-300 rounded bg-gray-50 mb-6 p-4">
           <legend className="font-semibold px-2">Extra Filter(s)</legend>
           <div className="flex items-center gap-4 mt-2">
@@ -968,7 +975,9 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             </div>
           </div>
         </fieldset>
+        )}
 
+        {featureConfig.enablePumps && (
         <fieldset className="border border-gray-300 rounded bg-gray-50 mb-6 p-4">
           <legend className="font-semibold px-2">External Water Pump</legend>
           <select
@@ -981,6 +990,7 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             <option value="mini">DAB Mini</option>
           </select>
         </fieldset>
+        )}
 
         <fieldset className="border border-gray-300 rounded bg-gray-50 mb-6 p-4">
           <legend className="font-semibold px-2">Connection Type</legend>
@@ -996,6 +1006,7 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
           </select>
         </fieldset>
 
+        {featureConfig.enableTrenching && (
         <fieldset className="border border-gray-300 rounded bg-gray-50 mb-6 p-4">
           <legend className="font-semibold px-2">Trenching Sections</legend>
           <div className="relative isolate overflow-hidden">
@@ -1064,7 +1075,9 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             <EasterEggOverlay message={easterEggMsg} />
           </div>
         </fieldset>
+        )}
 
+        {featureConfig.enableAbovegroundTrenching && (
         <fieldset className="border border-gray-300 rounded bg-gray-50 mb-6 p-4">
           <legend className="font-semibold px-2">Above-Ground Runs</legend>
           {ab_trenchingSections.map((section, index) => (
@@ -1132,7 +1145,9 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             + Add Another Section
           </button>
         </fieldset>
+        )}
 
+        {featureConfig.enablePanelUpgrade && (
         <fieldset className="border border-gray-300 rounded bg-gray-50 mb-6 p-4">
           <legend className="font-semibold px-2">Add-ons</legend>
           <select
@@ -1146,7 +1161,9 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             <option value="subpanel">Subpanel Upgrade</option>
           </select>
         </fieldset>
+        )}
 
+        {featureConfig.enableWarrantyUpgrades && (
         <fieldset className="border border-gray-300 rounded bg-gray-50 mb-6 p-4">
           <legend className="font-semibold px-2">Warranty Options</legend>
           <select
@@ -1160,7 +1177,9 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             <option value="warranty8">8-Year Extended Warranty</option>
           </select>
         </fieldset>
+        )}
 
+        {featureConfig.enableDemolition && (
         <fieldset className="border border-gray-300 rounded bg-gray-50 mb-6 p-4">
           <legend className="font-semibold px-2">Demolition</legend>
           <div className="flex items-center gap-4">
@@ -1190,12 +1209,15 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
             )}
           </div>
         </fieldset>
+        )}
 
+        {featureConfig.enableCustomAdjustments && (
         <CustomAdjustmentsGroup
           items={customAdjs}
           onChange={setCustomAdjs}
           onDirty={markDirty}
         />
+        )}
 
         {originalTotal !== null && (
           <>
@@ -1232,6 +1254,15 @@ export default function PartnerCalculator({ partner }: PartnerCalculatorProps) {
               )}
             </div>
           </>
+        )}
+
+        {featureConfig.customDisclaimers && (
+          <div className="mt-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+            <h3 className="font-semibold text-yellow-900 mb-2">Important Notice</h3>
+            <p className="text-sm text-yellow-800 whitespace-pre-wrap">
+              {featureConfig.customDisclaimers}
+            </p>
+          </div>
         )}
 
         <button
