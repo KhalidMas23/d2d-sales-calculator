@@ -583,6 +583,7 @@ const saveCurrentQuote = async () => {
       service_city: customer.serviceCity,
       service_state: customer.serviceState,
       service_zip: customer.serviceZip,
+      po_number: customer.poNumber || null,
       partner_id: currentPartner?.partner_code || 'AQUARIA_HQ',
       partner_name: currentPartner?.company_name || 'Aquaria Technologies',
       partner_logo_url: currentPartner?.logo_url || null,
